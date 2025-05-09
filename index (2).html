@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Website Collection</title>
+    <style>
+        :root {
+            --primary-color: #4a6cf7;
+            --secondary-color: #f7c94a;
+            --dark-color: #333;
+            --light-color: #f4f4f4;
+            --success-color: #5cb85c;
+            --error-color: #d9534f;
+        }
+        
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            background-color: var(--light-color);
+            color: var(--dark-color);
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 20px;
+        }
+        
+        header {
+            background-color: var(--primary-color);
+            color: white;
+            padding: 1rem 0;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        }
+        
+        header .container {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .logo {
+            font-size: 1.8rem;
+            font-weight: bold;
+        }
+        
+        main {
+            padding: 2rem 0;
+        }
+        
+        .sites-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 1.5rem;
+            margin-top: 2rem;
+        }
+        
+        .site-card {
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            position: relative;
+        }
+        
+        .site-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.12);
+        }
+        
+        .site-preview {
+            height: 180px;
+            background-color: #e9ecef;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #6c757d;
+            font-size: 1.5rem;
+        }
+        
+        .site-info {
+            padding: 1.5rem;
+        }
+        
+        .site-title {
+            font-size: 1.2rem;
+            margin-bottom: 0.5rem;
+            color: var(--dark-color);
+        }
+        
+        .site-description {
+            color: #6c757d;
+            font-size: 0.9rem;
+            margin-bottom: 1rem;
+        }
+        
+        .site-meta {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 0.8rem;
+            color: #6c757d;
+        }
+        
+        .site-buttons {
+            display: flex;
+            gap: 0.5rem;
+            margin-top: 1rem;
+        }
+        
+        .btn {
+            display: inline-block;
+            background: var(--primary-color);
+            color: white;
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            text-decoration: none;
+            font-size: 0.9rem;
+            transition: opacity 0.3s ease;
+        }
+        
+        .btn:hover {
+            opacity: 0.9;
+        }
+        
+        .btn-secondary {
+            background: var(--secondary-color);
+            color: var(--dark-color);
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 2rem 0;
+            display: none;
+        }
+        
+        .spinner {
+            width: 40px;
+            height: 40px;
+            margin: 0 auto;
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            border-radius: 50%;
+            border-top-color: var(--primary-color);
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+        
+        .status-message {
+            margin-top: 1rem;
+            padding: 0.75rem;
+            border-radius: 4px;
+        }
+        
+        .status-error {
+            background-color: #f8d7da;
+            color: var(--error-color);
+        }
+        
+        .status-success {
+            background-color: #d4edda;
+            color: var(--success-color);
+        }
+        
+        footer {
+            background-color: var(--dark-color);
+            color: white;
+            text-align: center;
+            padding: 1rem 0;
+            margin-top: 2rem;
+        }
+        
+        @media (max-width: 768px) {
+            .sites-grid {
+                grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            }
+            
+            header .container {
+                flex-direction: column;
+                text-align: center;
+            }
+            
+            .logo {
+                margin-bottom: 1rem;
+            }
+        }
+
+        .search-container {
+            margin: 1rem 0;
+        }
+
+        #searchInput {
+            padding: 0.5rem;
+            width: 100%;
+            max-width: 500px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 1rem;
+        }
+
+        .no-sites {
+            text-align: center;
+            padding: 2rem;
+            background: white;
+            border-radius: 8px;
+            margin-top: 2rem;
+        }
+
+        .site-badge {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: var(--secondary-color);
+            color: var(--dark-color);
+            padding: 0.2rem 0.5rem;
+            border-radius: 20px;
+            font-size: 0.7rem;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="container">
+            <div class="logo">My Website Collection</div>
+        </div>
+    </header>
+
+    <main class="container">
+        <h1>My Website Collection</h1>
+        <p>Browse through my collection of single-page websites. Click on any site to view it.</p>
+
+        <div class="search-container">
+            <input type="text" id="searchInput" placeholder="Search websites...">
+        </div>
+
+        <div id="statusMessage"></div>
+
+        <div id="loading" class="loading">
+            <div class="spinner"></div>
+            <p>Loading websites...</p>
+        </div>
+
+        <div id="sitesGrid" class="sites-grid">
+            <!-- Website cards will be dynamically inserted here -->
+        </div>
+
+        <div id="noSites" class="no-sites" style="display:none;">
+            <h3>No websites found</h3>
+            <p>Add HTML files to your repository to see them listed here.</p>
+        </div>
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>&copy; <span id="currentYear"></span> My Website Collection</p>
+        </div>
+    </footer>
+
+    <script>
+        // Set current year for footer
+        document.getElementById('currentYear').textContent = new Date().getFullYear();
+
+        // Show loading indicator
+        document.getElementById('loading').style.display = 'block';
+
+        // Function to display status messages
+        function showStatus(message, isError = false) {
+            const statusElement = document.getElementById('statusMessage');
+            statusElement.className = isError ? 'status-message status-error' : 'status-message status-success';
+            statusElement.textContent = message;
+            
+            // Clear message after 5 seconds
+            setTimeout(() => {
+                statusElement.textContent = '';
+                statusElement.className = '';
+            }, 5000);
+        }
+
+        // Function to fetch and display websites
+        async function loadWebsites() {
+            try {
+                // Get the current path
+                const currentPath = window.location.pathname;
+                const basePath = currentPath.endsWith('/') ? currentPath : currentPath + '/';
+                
+                // Fetch the list of files in the directory
+                const response = await fetch(basePath);
+                const html = await response.text();
+                
+                // Create a DOM parser to extract links
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(html, 'text/html');
+                
+                // Get all links (these are typically the files in the directory)
+                const links = Array.from(doc.querySelectorAll('a'))
+                    .filter(link => {
+                        const href = link.getAttribute('href');
+                        return href && 
+                               href.endsWith('.html') && 
+                               href !== 'index.html' &&
+                               !href.startsWith('http');
+                    })
+                    .map(link => ({
+                        name: link.textContent.trim(),
+                        path: link.getAttribute('href'),
+                        dateAdded: new Date() // We can't get actual dates easily, so using current date
+                    }));
+                
+                renderWebsites(links);
+            } catch (error) {
+                console.error('Error loading websites:', error);
+                showStatus('Failed to load websites. Please try again.', true);
+                document.getElementById('loading').style.display = 'none';
+            }
+        }
+
+        // Function to render website cards
+        function renderWebsites(websites) {
+            const sitesGrid = document.getElementById('sitesGrid');
+            const noSites = document.getElementById('noSites');
+            
+            // Hide loading indicator
+            document.getElementById('loading').style.display = 'none';
+            
+            // Clear existing content
+            sitesGrid.innerHTML = '';
+            
+            if (websites.length === 0) {
+                noSites.style.display = 'block';
+                return;
+            }
+            
+            noSites.style.display = 'none';
+            
+            // Create cards for each website
+            websites.forEach((site, index) => {
+                const card = document.createElement('div');
+                card.className = 'site-card';
+                
+                // Determine if this is a new site (added in the last 7 days)
+                const isNew = true; // Since we don't have real dates, showing "new" for demo
+                
+                if (isNew) {
+                    const badge = document.createElement('div');
+                    badge.className = 'site-badge';
+                    badge.textContent = 'NEW';
+                    card.appendChild(badge);
+                }
+                
+                card.innerHTML = `
+                    <div class="site-preview">
+                        <span>HTML</span>
+                    </div>
+                    <div class="site-info">
+                        <h3 class="site-title">${site.name || `Website ${index + 1}`}</h3>
+                        <p class="site-description">Single-page HTML website</p>
+                        <div class="site-meta">
+                            <span>Last Updated: ${new Date().toLocaleDateString()}</span>
+                        </div>
+                        <div class="site-buttons">
+                            <a href="${site.path}" class="btn" target="_blank">View Site</a>
+                        </div>
+                    </div>
+                `;
+                
+                sitesGrid.appendChild(card);
+            });
+            
+            showStatus(`Successfully loaded ${websites.length} websites`);
+        }
+
+        // Search functionality
+        document.getElementById('searchInput').addEventListener('input', function(e) {
+            const searchTerm = e.target.value.toLowerCase();
+            const cards = document.querySelectorAll('.site-card');
+            
+            cards.forEach(card => {
+                const title = card.querySelector('.site-title').textContent.toLowerCase();
+                if (title.includes(searchTerm)) {
+                    card.style.display = 'block';
+                } else {
+                    card.style.display = 'none';
+                }
+            });
+        });
+
+        // Load websites when the page loads
+        window.addEventListener('DOMContentLoaded', loadWebsites);
+    </script>
+</body>
+</html>
