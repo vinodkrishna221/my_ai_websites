@@ -1,0 +1,996 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CPU & OS Multitasking Simulator</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; display: flex; flex-direction: column; align-items: center; background-color: #f0f0f0; line-height: 1.4; }
+        #simulationContainer { display: flex; margin-top: 10px; width: 98%; max-width: 1400px; }
+        #canvasContainer { border: 1px solid #ccc; margin-right: 20px; position: relative; }
+        canvas { display: block; background-color: #fff; }
+        #controlsPanel { width: 320px; padding: 10px; background-color: #e9e9e9; border-radius: 5px; box-shadow: 0 0 10px rgba(0,0,0,0.1); overflow-y: auto; max-height: calc(100vh - 100px); }
+        .control-group { margin-bottom: 12px; border-bottom: 1px solid #ddd; padding-bottom: 12px; }
+        .control-group:last-child { border-bottom: none; }
+        .control-group label { display: block; margin-bottom: 4px; font-weight: bold; font-size: 0.9em;}
+        .control-group button, .control-group select, .control-group input { width: calc(100% - 16px); padding: 6px; box-sizing: border-box; margin-bottom: 4px; border-radius: 3px; border: 1px solid #ccc; font-size: 0.9em;}
+        input[type="range"] { padding: 0;}
+        h1 { margin: 10px 0; }
+        h2, h3 { text-align: center; color: #333; margin-top: 0; margin-bottom: 10px; font-size: 1.2em; }
+        h3 { font-size: 1em; background-color: #ddd; padding: 5px; border-radius: 3px;}
+        #statsPanel, #processInfoPanel { margin-top:10px; padding: 8px; background-color: #f9f9f9; border: 1px solid #ddd; border-radius: 3px; font-size: 0.85em; }
+        #processInfoPanel { min-height: 100px; }
+        .tooltip {
+            position: absolute;
+            background-color: rgba(0, 0, 0, 0.85);
+            color: white;
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 13px; /* Increased for readability */
+            pointer-events: none;
+            display: none;
+            white-space: pre-line; /* Allows \n for newlines */
+            z-index: 1000;
+            line-height: 1.5;
+        }
+    </style>
+</head>
+<body>
+    <h1>CPU & OS Multitasking Simulator</h1>
+
+    <div id="simulationContainer">
+        <div id="canvasContainer">
+            <canvas id="simulationCanvas" width="1000" height="700"></canvas>
+            <div id="tooltip" class="tooltip"></div>
+        </div>
+        <div id="controlsPanel">
+            <h2>Controls</h2>
+            
+            <div class="control-group">
+                <h3>Simulation</h3>
+                <label for="simSpeed">Speed: <span id="simSpeedLabel">1x</span></label>
+                <input type="range" id="simSpeed" min="0.1" max="5" step="0.1" value="1">
+                <button id="pauseResumeButton">Pause</button>
+                <button id="resetButton">Reset Simulation</button>
+            </div>
+
+            <div class="control-group">
+                <h3>CPU Configuration</h3>
+                <label for="numCores">Cores:</label>
+                <select id="numCores">
+                    <option value="1">1 Core</option>
+                    <option value="2" selected>2 Cores</option>
+                    <option value="4">4 Cores</option>
+                </select>
+            </div>
+
+            <div class="control-group">
+                <h3>Process Management</h3>
+                <label for="processType">Type:</label>
+                <select id="processType">
+                    <option value="CPU_BOUND">CPU-Bound</option>
+                    <option value="IO_BOUND">I/O-Bound</option>
+                </select>
+                <label for="initialThreads">Initial Threads:</label>
+                <input type="number" id="initialThreads" value="2" min="1" max="10">
+                <button id="spawnProcessButton">Spawn New Process</button>
+            </div>
+            <div class="control-group">
+                <label for="processToKill">Kill Process (PID):</label>
+                <input type="text" id="processToKill" placeholder="e.g., P1">
+                <button id="killProcessButton">Kill Process</button>
+            </div>
+             <div class="control-group">
+                <label>Quick Add Workload:</label>
+                <button id="addCpuLoadButton">Add CPU Load (3 CPU-Threads)</button>
+                <button id="addIoLoadButton">Add I/O Load (3 I/O-Threads)</button>
+            </div>
+
+
+            <div class="control-group">
+                <h3>Global Stats</h3>
+                <div id="statsPanel">
+                    <div>CPU Utilization: <span id="cpuUtilStat">0%</span></div>
+                    <div>Processes: <span id="processCountStat">0</span></div>
+                    <div>Threads: <span id="threadCountStat">0</span></div>
+                    <div>Context Switches: <span id="contextSwitchStat">0</span></div>
+                    <div>Global Ready Queue: <span id="globalReadyQueueSizeStat">0</span></div>
+                    <div>Sim Time: <span id="simTimeStat">0s</span></div>
+                </div>
+            </div>
+
+            <div class="control-group">
+                <h3>Selected Process Info</h3>
+                <div id="processInfoPanel">
+                    Click a process on the canvas...
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- Constants ---
+        const BASE_TIME_SLICE_MS = 100; 
+        const BASE_CONTEXT_SWITCH_COST_MS = 10;
+        const BASE_IO_OPERATION_MIN_MS = 300; // Increased for better visibility of blocking
+        const BASE_IO_OPERATION_MAX_MS = 800;
+        const BASE_CPU_BURST_MIN_MS = 150; // Increased for better visibility
+        const BASE_CPU_BURST_MAX_MS = 400;
+        
+        const THREAD_RADIUS = 7;
+        const PROCESS_PADDING = 8;
+        const THREAD_SPACING = 4;
+        const MAX_THREADS_PER_ROW_IN_QUEUES = 6;
+
+
+        // --- Global State & Config ---
+        let simulation;
+        let isPaused = false;
+        let currentSimSpeedFactor = 1; //This is set by the slider
+        let simTime = 0; // in seconds
+        let lastTimestamp = 0; // for gameLoop
+        let accumulatedSimTimeDelta = 0; // for fixed tick updates, in ms
+        const SIM_TICK_INTERVAL_MS = 16; // Target ~60 simulation ticks per second at 1x speed
+
+        // --- Canvas & Context ---
+        const canvas = document.getElementById('simulationCanvas');
+        const ctx = canvas.getContext('2d');
+        const tooltipElement = document.getElementById('tooltip');
+
+        // --- Utility Functions ---
+        function getRandomInt(min, max) {
+            return Math.floor(Math.random() * (max - min + 1)) + min;
+        }
+
+        function getRandomColor() {
+            const r = getRandomInt(100, 220); // Brighter colors
+            const g = getRandomInt(100, 220);
+            const b = getRandomInt(100, 220);
+            return `rgb(${r},${g},${b})`;
+        }
+        
+        // Timing scaled by simulation speed
+        const getTimeSlice = () => BASE_TIME_SLICE_MS; // Fixed for now, could be affected by speed if logic runs faster
+        const getContextSwitchCost = () => BASE_CONTEXT_SWITCH_COST_MS;
+        const getIoMin = () => BASE_IO_OPERATION_MIN_MS;
+        const getIoMax = () => BASE_IO_OPERATION_MAX_MS;
+        const getCpuMin = () => BASE_CPU_BURST_MIN_MS;
+        const getCpuMax = () => BASE_CPU_BURST_MAX_MS;
+
+
+        // --- Classes ---
+
+        class Thread {
+            static nextTidGlobal = 0;
+            constructor(pid, processColor, type, processIdNum) {
+                this.pid = pid;
+                this.processIdNum = processIdNum; // For unique TIDs across resets
+                this.tid = `T${this.processIdNum}-${Thread.nextTidGlobal++}`;
+                this.color = processColor; 
+                this.type = type; 
+                this.state = 'NEW'; // NEW, READY, RUNNING, BLOCKED, TERMINATED
+                
+                this.cpuBurstTimeTotal = 0; 
+                this.remainingCpuBurst = 0;
+                this.ioBurstTimeTotal = 0; 
+                this.remainingIoBurst = 0;
+
+                this.x = 0; this.y = 0; 
+                this.targetX = 0; this.targetY = 0;
+                this.generateBursts();
+            }
+
+            generateBursts() {
+                this.cpuBurstTimeTotal = getRandomInt(getCpuMin(), getCpuMax());
+                this.remainingCpuBurst = this.cpuBurstTimeTotal;
+                if (this.type === 'IO_BOUND') {
+                    this.ioBurstTimeTotal = getRandomInt(getIoMin(), getIoMax());
+                    this.remainingIoBurst = this.ioBurstTimeTotal; // Only set if I/O bound and needs an I/O op
+                } else {
+                    this.ioBurstTimeTotal = 0;
+                    this.remainingIoBurst = 0;
+                }
+            }
+
+            isCpuBound() { return this.type === 'CPU_BOUND'; }
+
+            execute(deltaTime) { // deltaTime is in ms
+                if (this.state !== 'RUNNING') return null;
+                this.remainingCpuBurst -= deltaTime;
+                if (this.remainingCpuBurst <= 0) {
+                    if (this.isCpuBound()) {
+                        this.generateBursts(); 
+                        this.state = 'READY'; 
+                        return 'CPU_BURST_COMPLETE';
+                    } else {
+                        // I/O Bound thread finished CPU burst, now needs I/O
+                        this.state = 'BLOCKED'; 
+                        this.remainingIoBurst = this.ioBurstTimeTotal; // Start I/O countdown
+                        return 'IO_REQUEST';
+                    }
+                }
+                return null; 
+            }
+
+            processIo(deltaTime) { // deltaTime is in ms
+                if (this.state !== 'BLOCKED' || this.remainingIoBurst <= 0) return null;
+                this.remainingIoBurst -= deltaTime;
+                if (this.remainingIoBurst <= 0) {
+                    this.generateBursts(); // Regenerate for next cycle (CPU burst first)
+                    this.state = 'READY';
+                    return 'IO_COMPLETE';
+                }
+                return null; 
+            }
+
+            draw(ctx) {
+                const lerpFactor = 0.15; // Smoother movement
+                this.x += (this.targetX - this.x) * lerpFactor;
+                this.y += (this.targetY - this.y) * lerpFactor;
+
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, THREAD_RADIUS, 0, Math.PI * 2);
+                ctx.fillStyle = this.color;
+                ctx.fill();
+                ctx.strokeStyle = '#222'; // Darker stroke
+                ctx.lineWidth = 1;
+                ctx.stroke();
+                
+                ctx.fillStyle = 'black';
+                ctx.font = `${THREAD_RADIUS -1}px Arial`; // Smaller font for TID
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                const shortTid = this.tid.substring(this.tid.indexOf('T') + this.tid.split('-')[0].length -1 ); // e.g. T0-1 -> T1
+                ctx.fillText(shortTid, this.x, this.y);
+            }
+
+            getTooltipText() {
+                let text = `Thread ${this.pid}:${this.tid}\nState: ${this.state}\nType: ${this.type}`;
+                if (this.state === 'RUNNING' || this.state === 'READY' || this.cpuBurstTimeTotal > 0) {
+                     text += `\nCPU Burst: ${Math.max(0,this.remainingCpuBurst).toFixed(0)}/${this.cpuBurstTimeTotal.toFixed(0)}ms`;
+                }
+                if (this.type === 'IO_BOUND' && (this.state === 'BLOCKED' || this.ioBurstTimeTotal > 0)) {
+                     text += `\nI/O Burst: ${Math.max(0,this.remainingIoBurst).toFixed(0)}/${this.ioBurstTimeTotal.toFixed(0)}ms`;
+                }
+                return text;
+            }
+        }
+
+        class Process {
+            static nextPidNumGlobal = 0;
+            constructor(type, initialThreadCount) {
+                this.pidNum = Process.nextPidNumGlobal++;
+                this.pid = `P${this.pidNum}`;
+                this.type = type; 
+                this.color = getRandomColor();
+                this.threads = [];
+                this.internalReadyQueue = []; 
+                this.internalBlockedQueue = [];    
+                this.x = 0; this.y = 0; this.width = 0; this.height = 0;
+
+                for (let i = 0; i < initialThreadCount; i++) {
+                    this.spawnThread();
+                }
+            }
+
+            spawnThread() {
+                const newThread = new Thread(this.pid, this.color, this.type, this.pidNum);
+                newThread.state = 'READY'; 
+                this.threads.push(newThread);
+                this.internalReadyQueue.push(newThread);
+                return newThread;
+            }
+
+            getOverallState() {
+                if (this.threads.length === 0) return 'TERMINATED';
+                if (this.threads.every(t => t.state === 'TERMINATED')) return 'TERMINATED';
+                if (this.threads.some(t => t.state === 'RUNNING')) return 'RUNNING';
+                if (this.threads.some(t => t.state === 'READY' || this.internalReadyQueue.length > 0 || simulation.globalReadyQueue.some(th => th.pid === this.pid))) return 'READY';
+                if (this.threads.every(t => t.state === 'BLOCKED' || t.state === 'TERMINATED')) return 'BLOCKED';
+                return 'MIXED/IDLE'; // If some ready, some blocked, etc.
+            }
+
+            update(deltaTime, globalReadyQueue) { // deltaTime in ms
+                // Promote threads from internal ready queue to global ready queue
+                while(this.internalReadyQueue.length > 0) {
+                    const thread = this.internalReadyQueue.shift();
+                    if (thread.state === 'READY') { 
+                         globalReadyQueue.push(thread);
+                    } else if (thread.state !== 'TERMINATED') {
+                        // If somehow not ready but not terminated, put back (should not happen often)
+                        this.internalReadyQueue.push(thread);
+                        console.warn(`Thread ${thread.pid}:${thread.tid} in internal readyQ but state is ${thread.state}`);
+                    }
+                }
+
+                // Process I/O for threads in internalBlockedQueue
+                for (let i = this.internalBlockedQueue.length - 1; i >= 0; i--) {
+                    const thread = this.internalBlockedQueue[i];
+                    const ioStatus = thread.processIo(deltaTime);
+                    if (ioStatus === 'IO_COMPLETE') {
+                        this.internalBlockedQueue.splice(i, 1); // Remove from blocked
+                        this.internalReadyQueue.push(thread);   // Add to internal ready
+                    } else if (thread.state === 'TERMINATED') {
+                        this.internalBlockedQueue.splice(i, 1); // Remove if terminated
+                    }
+                }
+                
+                this.threads = this.threads.filter(t => t.state !== 'TERMINATED');
+                if (this.threads.length === 0) {
+                    return 'TERMINATED'; 
+                }
+                return null;
+            }
+
+            draw(ctx, x, y, width) {
+                this.x = x; this.y = y; this.width = width;
+                
+                const titleHeight = 25;
+                const queueLabelHeight = 15;
+                const queueContentMinHeight = THREAD_RADIUS * 2 + THREAD_SPACING * 2;
+                
+                let internalReadyRows = Math.ceil(this.internalReadyQueue.length / MAX_THREADS_PER_ROW_IN_QUEUES);
+                internalReadyRows = Math.max(1, internalReadyRows); // At least one row visual space
+                let blockedRows = Math.ceil(this.internalBlockedQueue.length / MAX_THREADS_PER_ROW_IN_QUEUES);
+                blockedRows = Math.max(1, blockedRows);
+
+                const internalReadyHeight = queueLabelHeight + internalReadyRows * (THREAD_RADIUS * 2 + THREAD_SPACING) + PROCESS_PADDING;
+                const blockedHeight = queueLabelHeight + blockedRows * (THREAD_RADIUS * 2 + THREAD_SPACING) + PROCESS_PADDING;
+
+                this.height = titleHeight + internalReadyHeight + blockedHeight + PROCESS_PADDING * 2;
+
+                // Background and Border
+                ctx.fillStyle = this.color;
+                ctx.globalAlpha = 0.8; // Slight transparency for process boxes
+                ctx.fillRect(this.x, this.y, this.width, this.height);
+                ctx.globalAlpha = 1.0;
+                ctx.strokeStyle = (simulation.selectedProcess === this) ? 'gold' : 'black'; // Highlight selected
+                ctx.lineWidth = (simulation.selectedProcess === this) ? 3 : 1;
+                ctx.strokeRect(this.x, this.y, this.width, this.height);
+                ctx.lineWidth = 1;
+
+
+                // Title
+                ctx.fillStyle = 'black';
+                ctx.font = 'bold 13px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(`${this.pid} (${this.type.slice(0,3)})`, this.x + this.width / 2, this.y + titleHeight / 2 + 5);
+                
+                let currentY = this.y + titleHeight + PROCESS_PADDING;
+
+                // Draw internal ready queue area
+                ctx.fillStyle = 'rgba(0,0,0,0.05)'; // Slight background for queue areas
+                ctx.fillRect(this.x + PROCESS_PADDING, currentY, this.width - 2 * PROCESS_PADDING, internalReadyHeight);
+                ctx.strokeStyle = '#777';
+                ctx.strokeRect(this.x + PROCESS_PADDING, currentY, this.width - 2 * PROCESS_PADDING, internalReadyHeight);
+                ctx.fillStyle = 'black'; ctx.font = '11px Arial';
+                ctx.fillText(`Proc.Ready (${this.internalReadyQueue.length})`, this.x + this.width/2, currentY + queueLabelHeight - 2);
+                this.drawThreadsInQueueArea(this.internalReadyQueue, 
+                    this.x + PROCESS_PADDING, 
+                    currentY + queueLabelHeight, 
+                    this.width - 2 * PROCESS_PADDING, 
+                    internalReadyHeight - queueLabelHeight);
+                currentY += internalReadyHeight + PROCESS_PADDING / 2;
+
+                // Draw blocked queue area
+                ctx.fillStyle = 'rgba(0,0,0,0.05)';
+                ctx.fillRect(this.x + PROCESS_PADDING, currentY, this.width - 2 * PROCESS_PADDING, blockedHeight);
+                ctx.strokeStyle = '#777';
+                ctx.strokeRect(this.x + PROCESS_PADDING, currentY, this.width - 2 * PROCESS_PADDING, blockedHeight);
+                ctx.fillStyle = 'black'; ctx.font = '11px Arial';
+                ctx.fillText(`Proc.Blocked (${this.internalBlockedQueue.length})`, this.x + this.width/2, currentY + queueLabelHeight - 2);
+                 this.drawThreadsInQueueArea(this.internalBlockedQueue, 
+                    this.x + PROCESS_PADDING, 
+                    currentY + queueLabelHeight, 
+                    this.width - 2 * PROCESS_PADDING, 
+                    blockedHeight - queueLabelHeight);
+            }
+            
+            drawThreadsInQueueArea(queue, qx, qy, qw, qh) {
+                const startX = qx + THREAD_RADIUS + THREAD_SPACING;
+                const startY = qy + THREAD_RADIUS + THREAD_SPACING / 2;
+                queue.forEach((thread, index) => {
+                    const col = index % MAX_THREADS_PER_ROW_IN_QUEUES;
+                    const row = Math.floor(index / MAX_THREADS_PER_ROW_IN_QUEUES);
+                    thread.targetX = startX + col * (THREAD_RADIUS * 2 + THREAD_SPACING);
+                    thread.targetY = startY + row * (THREAD_RADIUS * 2 + THREAD_SPACING);
+                });
+            }
+
+            getTooltipText() {
+                 return `Process ${this.pid}\nType: ${this.type}\nThreads: ${this.threads.length} (InternalReady:${this.internalReadyQueue.length} Blocked:${this.internalBlockedQueue.length})\nState: ${this.getOverallState()}`;
+            }
+
+            terminate() {
+                this.threads.forEach(t => t.state = 'TERMINATED');
+                this.internalReadyQueue = [];
+                this.internalBlockedQueue = [];
+            }
+        }
+
+        class Core {
+            constructor(id, x, y, width, height) {
+                this.id = id;
+                this.currentThread = null;
+                this.timeSliceRemaining = 0;
+                this.isContextSwitching = false;
+                this.contextSwitchTimeRemaining = 0;
+                this.pendingThread = null; // Thread to run after context switch
+                
+                this.x = x; this.y = y; this.width = width; this.height = height;
+                
+                this.utilization = 0; // 0 to 1, smoothed
+                this.busyTimeInWindow = 0; // ms
+                this.currentWindowTime = 0; // ms
+                this.UTIL_WINDOW_MS = 1000; // Calculate utilization over 1 second
+            }
+            
+            assignThread(thread) {
+                this.isContextSwitching = true;
+                this.contextSwitchTimeRemaining = getContextSwitchCost();
+                this.pendingThread = thread; 
+            }
+            
+            _switchToPendingThread() {
+                this.currentThread = this.pendingThread;
+                this.pendingThread = null;
+                if (this.currentThread) {
+                    this.currentThread.state = 'RUNNING';
+                    this.timeSliceRemaining = getTimeSlice();
+                    this.currentThread.targetX = this.x + this.width / 2;
+                    this.currentThread.targetY = this.y + this.height / 2;
+                }
+                this.isContextSwitching = false;
+            }
+
+            update(deltaTime, globalReadyQueue, ioQueueForProcesses) { // deltaTime in ms
+                this.currentWindowTime += deltaTime;
+
+                if (this.isContextSwitching) {
+                    this.contextSwitchTimeRemaining -= deltaTime;
+                    // Context switch cost is considered "busy" but not productive
+                    this.busyTimeInWindow += deltaTime; 
+                    if (this.contextSwitchTimeRemaining <= 0) {
+                        this._switchToPendingThread();
+                        simulation.incrementContextSwitches();
+                    }
+                } else if (this.currentThread) {
+                    this.busyTimeInWindow += deltaTime;
+                    const result = this.currentThread.execute(deltaTime);
+                    this.timeSliceRemaining -= deltaTime;
+
+                    let threadYieldsCpu = false;
+                    if (result === 'CPU_BURST_COMPLETE') {
+                        this.currentThread.state = 'READY'; // Already set by thread.execute
+                        globalReadyQueue.push(this.currentThread);
+                        threadYieldsCpu = true;
+                    } else if (result === 'IO_REQUEST') {
+                        // Move to its own process's blocked queue
+                        const parentProc = simulation.processes.find(p => p.pid === this.currentThread.pid);
+                        if(parentProc) parentProc.internalBlockedQueue.push(this.currentThread);
+                        else this.currentThread.state = 'TERMINATED'; // Orphaned
+                        threadYieldsCpu = true;
+                    } else if (this.timeSliceRemaining <= 0 && this.currentThread.remainingCpuBurst > 0) {
+                        // Time slice end, but CPU burst not finished
+                        this.currentThread.state = 'READY';
+                        globalReadyQueue.push(this.currentThread);
+                        threadYieldsCpu = true;
+                    } else if (this.currentThread.remainingCpuBurst <= 0 && this.currentThread.isCpuBound()) {
+                        // Should be covered by CPU_BURST_COMPLETE, but as a fallback
+                        this.currentThread.state = 'READY';
+                        globalReadyQueue.push(this.currentThread);
+                        threadYieldsCpu = true;
+                    }
+
+
+                    if (threadYieldsCpu) {
+                        this.currentThread = null;
+                        this.timeSliceRemaining = 0;
+                    }
+                }
+
+                // Update utilization
+                if (this.currentWindowTime >= this.UTIL_WINDOW_MS) {
+                    this.utilization = Math.min(1, this.busyTimeInWindow / this.currentWindowTime); // Cap at 100%
+                    this.busyTimeInWindow = 0;
+                    this.currentWindowTime = 0;
+                } else if (this.currentWindowTime > 0 && this.UTIL_WINDOW_MS > this.currentWindowTime) {
+                    // Provide a more reactive utilization if window not full yet
+                    this.utilization = Math.min(1, this.busyTimeInWindow / this.currentWindowTime);
+                }
+
+            }
+            
+            isIdle() {
+                return !this.currentThread && !this.isContextSwitching && !this.pendingThread;
+            }
+
+            draw(ctx) {
+                let coreFillColor = '#d0e0f0'; // Idle
+                if (this.isContextSwitching) coreFillColor = '#FFD700'; // Gold for context switch
+                else if (this.currentThread) coreFillColor = '#a0c0e0'; // Busy
+
+                ctx.fillStyle = coreFillColor;
+                ctx.fillRect(this.x, this.y, this.width, this.height);
+                ctx.strokeStyle = '#555';
+                ctx.strokeRect(this.x, this.y, this.width, this.height);
+
+                ctx.fillStyle = 'black';
+                ctx.font = 'bold 12px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(`Core ${this.id}`, this.x + this.width / 2, this.y + 15);
+                ctx.font = '10px Arial';
+                if (this.currentThread) {
+                     ctx.fillText(`${this.currentThread.pid}:${this.currentThread.tid.split('-')[1]}`, this.x + this.width / 2, this.y + 32);
+                     ctx.fillText(`CPU: ${this.currentThread.remainingCpuBurst.toFixed(0)}`, this.x + this.width / 2, this.y + 46);
+                     ctx.fillText(`TS: ${this.timeSliceRemaining.toFixed(0)}`, this.x + this.width / 2, this.y + 60);
+                } else if (this.isContextSwitching) {
+                    ctx.fillText(`Context Switch`, this.x + this.width / 2, this.y + 32);
+                    ctx.fillText(`${this.contextSwitchTimeRemaining.toFixed(0)}ms`, this.x + this.width / 2, this.y + 46);
+                } else {
+                    ctx.fillText(`Idle`, this.x + this.width / 2, this.y + 32);
+                }
+                ctx.font = 'bold 11px Arial';
+                ctx.fillText(`${(this.utilization * 100).toFixed(0)}%`, this.x + this.width / 2, this.y + this.height - 12);
+            }
+        }
+        
+        class CPU {
+            constructor(numCores, x, y, width, height) {
+                this.x = x; this.y = y; this.width = width; this.height = height; // Area for CPU block
+                this.coreAreaX = x + 5; 
+                this.coreAreaY = y + 25;
+                this.coreAreaWidth = width - 10;
+                this.coreAreaHeight = height - 30;
+                this.cores = [];
+                this.setCoreCount(numCores);
+            }
+
+            setCoreCount(numCores) {
+                this.cores = [];
+                const coreSpacing = 8;
+                const totalSpacing = (numCores - 1) * coreSpacing;
+                const coreWidth = (this.coreAreaWidth - totalSpacing) / numCores;
+                const coreHeight = this.coreAreaHeight;
+
+                for (let i = 0; i < numCores; i++) {
+                    this.cores.push(new Core(i, 
+                        this.coreAreaX + i * (coreWidth + coreSpacing), 
+                        this.coreAreaY, 
+                        coreWidth, 
+                        coreHeight
+                    ));
+                }
+            }
+
+            getIdleCores() {
+                return this.cores.filter(core => core.isIdle());
+            }
+
+            update(deltaTime, globalReadyQueue) { // Removed ioDevice from here
+                this.cores.forEach(core => core.update(deltaTime, globalReadyQueue)); // Pass only GRQ
+            }
+
+            draw(ctx) {
+                ctx.fillStyle = '#c8c8c8'; // CPU block color
+                ctx.fillRect(this.x, this.y, this.width, this.height);
+                ctx.strokeStyle = 'black';
+                ctx.strokeRect(this.x, this.y, this.width, this.height);
+                
+                ctx.fillStyle = 'black';
+                ctx.font = 'bold 16px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('CPU', this.x + this.width/2, this.y + 18);
+
+                this.cores.forEach(core => core.draw(ctx));
+            }
+            
+            getOverallUtilization() {
+                if (this.cores.length === 0) return 0;
+                const totalUtil = this.cores.reduce((sum, core) => sum + core.utilization, 0);
+                return totalUtil / this.cores.length;
+            }
+        }
+
+        class Scheduler { // Simple Round Robin from Global Ready Queue
+            schedule(cpu, globalReadyQueue) {
+                const idleCores = cpu.getIdleCores();
+                for (const core of idleCores) {
+                    if (globalReadyQueue.length > 0) {
+                        const threadToRun = globalReadyQueue.shift(); 
+                        if (threadToRun.state === 'READY') { 
+                           core.assignThread(threadToRun);
+                        } else if (threadToRun.state !== 'TERMINATED'){
+                            globalReadyQueue.push(threadToRun); // Put back if not ready but not terminated
+                            console.warn(`Thread ${threadToRun.pid}:${threadToRun.tid} was in GRQ but not READY (${threadToRun.state}). Re-queued.`);
+                        }
+                    } else {
+                        break; 
+                    }
+                }
+            }
+        }
+        
+        // IODevice class is removed for simplification. I/O is handled by process's internalBlockedQueue.
+        // A visual "I/O Area" could be drawn if desired, but threads won't move there.
+
+        class Simulation {
+            constructor() {
+                // Layout constants
+                this.CPU_AREA_X = 10;
+                this.CPU_AREA_Y = 10;
+                this.CPU_AREA_HEIGHT = 130;
+                this.GRQ_AREA_Y_OFFSET = 10;
+                this.GRQ_AREA_HEIGHT = 60;
+                this.PROCESS_AREA_Y_OFFSET = 10;
+                this.PROCESS_AREA_X_MARGIN = 10;
+                this.PROCESS_SPACING = 10;
+                this.MIN_PROCESS_WIDTH = 160;
+                this.MAX_PROCESS_WIDTH = 250;
+
+                this.cpu = new CPU(2, this.CPU_AREA_X, this.CPU_AREA_Y, canvas.width - 20, this.CPU_AREA_HEIGHT);
+                this.processes = [];
+                this.globalReadyQueue = [];
+                this.scheduler = new Scheduler();
+                this.contextSwitches = 0;
+                this.selectedProcess = null;
+
+                this.resetStaticCounters();
+            }
+            
+            resetStaticCounters() {
+                Thread.nextTidGlobal = 0;
+                Process.nextPidNumGlobal = 0;
+            }
+
+            reset() {
+                this.resetStaticCounters();
+                this.processes.forEach(p => p.terminate());
+                this.processes = [];
+                this.globalReadyQueue = [];
+                this.cpu.setCoreCount(parseInt(document.getElementById('numCores').value));
+                this.cpu.cores.forEach(core => { // Full reset for cores
+                    core.currentThread = null; core.pendingThread = null; core.isContextSwitching = false;
+                    core.timeSliceRemaining = 0; core.contextSwitchTimeRemaining = 0;
+                    core.utilization = 0; core.busyTimeInWindow = 0; core.currentWindowTime = 0;
+                });
+                this.contextSwitches = 0;
+                simTime = 0;
+                this.selectedProcess = null;
+                document.getElementById('processInfoPanel').innerHTML = 'Click a process on the canvas...';
+                console.log("Simulation Reset");
+            }
+
+            spawnProcess(type, initialThreadCount) {
+                const newProcess = new Process(type, initialThreadCount);
+                this.processes.push(newProcess);
+                console.log(`Spawned ${newProcess.pid} (${type}, ${initialThreadCount} threads)`);
+            }
+
+            killProcess(pidToKill) {
+                const processIndex = this.processes.findIndex(p => p.pid === pidToKill);
+                if (processIndex > -1) {
+                    const process = this.processes[processIndex];
+                    process.terminate(); 
+
+                    this.globalReadyQueue = this.globalReadyQueue.filter(t => t.pid !== pidToKill || t.state === 'TERMINATED');
+                    
+                    this.cpu.cores.forEach(core => {
+                        if (core.currentThread && core.currentThread.pid === pidToKill) {
+                            core.currentThread.state = 'TERMINATED'; core.currentThread = null;
+                        }
+                        if (core.pendingThread && core.pendingThread.pid === pidToKill) {
+                            core.pendingThread.state = 'TERMINATED'; core.pendingThread = null;
+                            core.isContextSwitching = false; 
+                        }
+                    });
+                    // Process removed in main tick when all its threads are gone
+                    console.log(`Killing Process ${pidToKill}`);
+                    if(this.selectedProcess && this.selectedProcess.pid === pidToKill) {
+                        this.selectedProcess = null;
+                        document.getElementById('processInfoPanel').innerHTML = 'Click a process on the canvas...';
+                    }
+                } else {
+                    console.warn(`Process ${pidToKill} not found for killing.`);
+                }
+            }
+            
+            incrementContextSwitches() { this.contextSwitches++; }
+
+            tick(deltaTime) { // deltaTime in ms
+                if (isPaused) return;
+
+                simTime += deltaTime / 1000; // total sim time in seconds
+
+                // 1. Update Processes (handles I/O completion, promotes to global ready queue)
+                for (let i = this.processes.length - 1; i >= 0; i--) {
+                    const process = this.processes[i];
+                    const processStatus = process.update(deltaTime, this.globalReadyQueue);
+                    if (processStatus === 'TERMINATED' && process.threads.length === 0) {
+                        this.processes.splice(i, 1);
+                         if(this.selectedProcess && this.selectedProcess.pid === process.pid) {
+                            this.selectedProcess = null;
+                            document.getElementById('processInfoPanel').innerHTML = 'Click a process on the canvas...';
+                        }
+                    }
+                }
+                
+                // 2. Scheduler assigns threads
+                this.scheduler.schedule(this.cpu, this.globalReadyQueue);
+
+                // 3. Update CPU Cores
+                this.cpu.update(deltaTime, this.globalReadyQueue);
+                
+                // Clean terminated threads from global ready queue (safety net)
+                this.globalReadyQueue = this.globalReadyQueue.filter(t => t.state !== 'TERMINATED');
+            }
+
+            draw() {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                this.cpu.draw(ctx);
+                
+                const grqX = this.CPU_AREA_X;
+                const grqY = this.CPU_AREA_Y + this.CPU_AREA_HEIGHT + this.GRQ_AREA_Y_OFFSET;
+                const grqW = canvas.width - 2 * this.CPU_AREA_X;
+                const grqH = this.GRQ_AREA_HEIGHT;
+
+                ctx.fillStyle = '#e8e8e8'; // Light gray for GRQ background
+                ctx.fillRect(grqX, grqY, grqW, grqH);
+                ctx.strokeStyle = '#b0b0b0'; // Darker gray border
+                ctx.strokeRect(grqX, grqY, grqW, grqH);
+                ctx.fillStyle = 'black'; ctx.font = 'bold 13px Arial'; ctx.textAlign = 'center';
+                ctx.fillText(`Global Ready Queue (${this.globalReadyQueue.length})`, grqX + grqW/2, grqY + 18);
+
+                const threadsPerRowInGRQ = Math.floor((grqW - 2 * PROCESS_PADDING) / (THREAD_RADIUS * 2 + THREAD_SPACING));
+                this.globalReadyQueue.forEach((thread, index) => {
+                    const col = index % threadsPerRowInGRQ;
+                    const row = Math.floor(index / threadsPerRowInGRQ);
+                    thread.targetX = grqX + PROCESS_PADDING + THREAD_RADIUS + col * (THREAD_RADIUS * 2 + THREAD_SPACING);
+                    thread.targetY = grqY + 25 + THREAD_RADIUS + row * (THREAD_RADIUS * 2 + THREAD_SPACING); // Adjusted Y for label
+                });
+
+                // Draw Processes
+                const processAreaStartY = grqY + grqH + this.PROCESS_AREA_Y_OFFSET;
+                let currentProcX = this.PROCESS_AREA_X_MARGIN;
+                const availableWidthForProcesses = canvas.width - 2 * this.PROCESS_AREA_X_MARGIN;
+                let pWidth = this.MIN_PROCESS_WIDTH;
+                if (this.processes.length > 0) {
+                    pWidth = Math.max(this.MIN_PROCESS_WIDTH, 
+                                   Math.min(this.MAX_PROCESS_WIDTH, 
+                                            (availableWidthForProcesses - (this.processes.length - 1) * this.PROCESS_SPACING) / this.processes.length));
+                }
+
+                this.processes.forEach((process) => {
+                    if (currentProcX + pWidth > canvas.width - this.PROCESS_AREA_X_MARGIN) { // Simple wrapping (imperfect)
+                        currentProcX = this.PROCESS_AREA_X_MARGIN;
+                        // This needs a more robust layout for many processes (e.g. multiple rows)
+                        // For now, they might overlap if too many.
+                    }
+                    process.draw(ctx, currentProcX, processAreaStartY, pWidth);
+                    currentProcX += pWidth + this.PROCESS_SPACING;
+                });
+
+                // Draw all non-terminated threads
+                this.getAllThreads().forEach(thread => {
+                    if (thread.state !== 'TERMINATED') thread.draw(ctx);
+                });
+
+                this.updateStatsPanelDOM();
+            }
+
+            getAllThreads() {
+                let all = [];
+                this.processes.forEach(p => all = all.concat(p.threads));
+                return all;
+            }
+
+            updateStatsPanelDOM() {
+                document.getElementById('cpuUtilStat').textContent = `${(this.cpu.getOverallUtilization() * 100).toFixed(1)}%`;
+                document.getElementById('processCountStat').textContent = this.processes.length;
+                document.getElementById('threadCountStat').textContent = this.getAllThreads().filter(t => t.state !== 'TERMINATED').length;
+                document.getElementById('contextSwitchStat').textContent = this.contextSwitches;
+                document.getElementById('globalReadyQueueSizeStat').textContent = this.globalReadyQueue.length;
+                document.getElementById('simTimeStat').textContent = `${simTime.toFixed(1)}s`;
+            }
+
+            handleCanvasClick(event) {
+                const rect = canvas.getBoundingClientRect();
+                const x = event.clientX - rect.left;
+                const y = event.clientY - rect.top;
+
+                let clickedOnProcess = null;
+                for (const process of this.processes) { // Iterate backwards for top-most
+                    if (x >= process.x && x <= process.x + process.width &&
+                        y >= process.y && y <= process.y + process.height) {
+                        clickedOnProcess = process;
+                        break; 
+                    }
+                }
+                this.selectedProcess = clickedOnProcess;
+                this.updateProcessInfoPanelDOM();
+            }
+            
+            handleCanvasMouseMove(event) {
+                const rect = canvas.getBoundingClientRect();
+                const mouseX = event.clientX - rect.left;
+                const mouseY = event.clientY - rect.top;
+                let foundTooltipTarget = false;
+
+                // Check threads (iterate backwards for top-most)
+                const allThreads = this.getAllThreads();
+                for (let i = allThreads.length - 1; i >= 0; i--) {
+                    const thread = allThreads[i];
+                     if (thread.state === 'TERMINATED') continue;
+                    const distSq = Math.pow(mouseX - thread.x, 2) + Math.pow(mouseY - thread.y, 2);
+                    if (distSq <= THREAD_RADIUS * THREAD_RADIUS) {
+                        tooltipElement.innerHTML = thread.getTooltipText();
+                        tooltipElement.style.left = `${event.clientX + 15}px`; // Offset from cursor
+                        tooltipElement.style.top = `${event.clientY + 15}px`;
+                        tooltipElement.style.display = 'block';
+                        foundTooltipTarget = true;
+                        break;
+                    }
+                }
+                if (foundTooltipTarget) return;
+
+                // Check processes (iterate backwards)
+                for (let i = this.processes.length - 1; i >=0; i--) {
+                     const process = this.processes[i];
+                     if (mouseX >= process.x && mouseX <= process.x + process.width &&
+                        mouseY >= process.y && mouseY <= process.y + process.height) {
+                        tooltipElement.innerHTML = process.getTooltipText();
+                        tooltipElement.style.left = `${event.clientX + 15}px`;
+                        tooltipElement.style.top = `${event.clientY + 15}px`;
+                        tooltipElement.style.display = 'block';
+                        foundTooltipTarget = true;
+                        break;
+                    }
+                }
+                if (foundTooltipTarget) return;
+
+                // Check Cores
+                for (const core of this.cpu.cores) {
+                    if (mouseX >= core.x && mouseX <= core.x + core.width &&
+                        mouseY >= core.y && mouseY <= core.y + core.height) {
+                        let tooltipText = `Core ${core.id}\nStatus: ${core.currentThread ? 'Busy' : (core.isContextSwitching ? 'Context Switching' : 'Idle')}\nUtil: ${(core.utilization * 100).toFixed(0)}%`;
+                        if(core.currentThread) tooltipText += `\nRunning: ${core.currentThread.pid}:${core.currentThread.tid.split('-')[1]}`;
+                        else if(core.pendingThread) tooltipText += `\nPending: ${core.pendingThread.pid}:${core.pendingThread.tid.split('-')[1]}`;
+                        tooltipElement.innerHTML = tooltipText;
+                        tooltipElement.style.left = `${event.clientX + 15}px`;
+                        tooltipElement.style.top = `${event.clientY + 15}px`;
+                        tooltipElement.style.display = 'block';
+                        foundTooltipTarget = true;
+                        break;
+                    }
+                }
+
+                if (!foundTooltipTarget) {
+                    tooltipElement.style.display = 'none';
+                }
+            }
+
+            updateProcessInfoPanelDOM() {
+                const panel = document.getElementById('processInfoPanel');
+                if (this.selectedProcess) {
+                    const p = this.selectedProcess;
+                    const activeThreads = p.threads.filter(t => t.state !== 'TERMINATED');
+                    const runningThreads = activeThreads.filter(t => t.state === 'RUNNING').length;
+                    const readyInProcQ = p.internalReadyQueue.length;
+                    const readyInGlobalQ = this.globalReadyQueue.filter(t => t.pid === p.pid).length;
+                    const blockedThreads = p.internalBlockedQueue.length;
+                    
+                    panel.innerHTML = `
+                        <strong>PID:</strong> ${p.pid}<br>
+                        <strong>Type:</strong> ${p.type}<br>
+                        <div style="display: flex; align-items: center;"><strong>Color:</strong> <span style="background-color:${p.color}; padding: 2px 10px; margin-left: 5px; border: 1px solid #555;">&nbsp;</span></div>
+                        <strong>Total Active Threads:</strong> ${activeThreads.length}<br>
+                        &nbsp;&nbsp;Running: ${runningThreads}<br>
+                        &nbsp;&nbsp;Ready (In Proc): ${readyInProcQ}<br>
+                        &nbsp;&nbsp;Ready (Global): ${readyInGlobalQ}<br>
+                        &nbsp;&nbsp;Blocked (In Proc): ${blockedThreads}<br>
+                        <strong>Overall State:</strong> ${p.getOverallState()}
+                    `;
+                } else {
+                    panel.innerHTML = 'Click a process on the canvas...';
+                }
+            }
+        }
+
+        // --- Main Loop ---
+        function gameLoop(timestamp) {
+            const rawDeltaTime = timestamp - lastTimestamp; // Time since last frame in ms
+            lastTimestamp = timestamp;
+
+            // Calculate simulation time delta, adjusted by speed
+            // Ensure it's not excessively large if tab was inactive
+            const effectiveFrameDelta = Math.min(rawDeltaTime, 100) * currentSimSpeedFactor; 
+            accumulatedSimTimeDelta += effectiveFrameDelta;
+
+            // Perform fixed-step updates for simulation logic
+            while (accumulatedSimTimeDelta >= SIM_TICK_INTERVAL_MS) {
+                 simulation.tick(SIM_TICK_INTERVAL_MS); 
+                 accumulatedSimTimeDelta -= SIM_TICK_INTERVAL_MS;
+            }
+           
+            simulation.draw(); // Render based on current state
+            requestAnimationFrame(gameLoop);
+        }
+
+        // --- Event Listeners ---
+        const simSpeedSlider = document.getElementById('simSpeed');
+        const simSpeedLabel = document.getElementById('simSpeedLabel');
+        simSpeedSlider.addEventListener('input', (e) => {
+            currentSimSpeedFactor = parseFloat(e.target.value);
+            simSpeedLabel.textContent = `${currentSimSpeedFactor.toFixed(1)}x`;
+        });
+
+        document.getElementById('pauseResumeButton').addEventListener('click', () => {
+            isPaused = !isPaused;
+            document.getElementById('pauseResumeButton').textContent = isPaused ? 'Resume' : 'Pause';
+        });
+        
+        document.getElementById('resetButton').addEventListener('click', () => {
+            simulation.reset();
+            isPaused = false; 
+            document.getElementById('pauseResumeButton').textContent = 'Pause';
+        });
+
+        document.getElementById('numCores').addEventListener('change', (e) => {
+            if (simulation) { // Ensure simulation exists
+                simulation.cpu.setCoreCount(parseInt(e.target.value));
+            }
+        });
+
+        document.getElementById('spawnProcessButton').addEventListener('click', () => {
+            const type = document.getElementById('processType').value;
+            const initialThreads = parseInt(document.getElementById('initialThreads').value);
+            if (simulation) simulation.spawnProcess(type, initialThreads);
+        });
+        
+        document.getElementById('killProcessButton').addEventListener('click', () => {
+            const pidToKill = document.getElementById('processToKill').value;
+            if (pidToKill && simulation) {
+                simulation.killProcess(pidToKill.toUpperCase()); 
+                document.getElementById('processToKill').value = '';
+            }
+        });
+
+        document.getElementById('addCpuLoadButton').addEventListener('click', () => {
+            if (simulation) simulation.spawnProcess('CPU_BOUND', 3);
+        });
+
+        document.getElementById('addIoLoadButton').addEventListener('click', () => {
+            if (simulation) simulation.spawnProcess('IO_BOUND', 3);
+        });
+
+        canvas.addEventListener('click', (event) => {
+            if (simulation) simulation.handleCanvasClick(event);
+        });
+        canvas.addEventListener('mousemove', (event) => {
+            if (simulation) simulation.handleCanvasMouseMove(event);
+        });
+        canvas.addEventListener('mouseout', () => { 
+            tooltipElement.style.display = 'none';
+        });
+
+
+        // --- Initialization ---
+        function init() {
+            simulation = new Simulation();
+            const initialCores = parseInt(document.getElementById('numCores').value)
+            simulation.cpu.setCoreCount(initialCores); 
+            
+            // Start with a couple of processes for demonstration
+            simulation.spawnProcess('CPU_BOUND', 2);
+            simulation.spawnProcess('IO_BOUND', 2);
+            
+            lastTimestamp = performance.now();
+            requestAnimationFrame(gameLoop);
+        }
+
+        window.onload = init;
+
+    </script>
+</body>
+</html>
