@@ -1,0 +1,22 @@
+# netlify.toml - Configuration for your Netlify deployment
+
+[build]
+  # Base directory is the root of your repository
+  base = "/"
+  # The directory to publish (the website container is in the root)
+  publish = "/"
+  # No build command needed since these are static files
+  command = ""
+
+# Enable directory listing to show all HTML files
+[[headers]]
+  for = "/*"
+    [headers.values]
+    # Enable directory listing
+    X-Content-Type-Options = "nosniff"
+
+# Redirect any 404s to the main page
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 404
