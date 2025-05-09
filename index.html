@@ -294,34 +294,91 @@
         // Function to fetch and display websites
         async function loadWebsites() {
             try {
-                // Get the current path
-                const currentPath = window.location.pathname;
-                const basePath = currentPath.endsWith('/') ? currentPath : currentPath + '/';
+                // For Netlify, we'll use a manifest file approach instead of directory listing
+                // First, check if there's a sites-manifest.json file
+                try {
+                    const manifestResponse = await fetch('/sites-manifest.json');
+                    if (manifestResponse.ok) {
+                        const sites = await manifestResponse.json();
+                        renderWebsites(sites);
+                        return;
+                    }
+                } catch (manifestError) {
+                    console.log('No manifest file found, using fallback method');
+                }
                 
-                // Fetch the list of files in the directory
-                const response = await fetch(basePath);
-                const html = await response.text();
+                // Fallback: Look for common HTML files
+                // This is a list of potential HTML files to check
+                const commonFilenames = [
+                    'site1.html', 'site2.html', 'site3.html', 'site4.html', 'site5.html',
+                    'site6.html', 'site7.html', 'site8.html', 'site9.html', 'site10.html',
+                    'website1.html', 'website2.html', 'website3.html', 'website4.html', 'website5.html',
+                    'portfolio.html', 'about.html', 'contact.html', 'blog.html', 'services.html',
+                    'gallery.html', 'projects.html', 'resume.html', 'cv.html', 'products.html'
+                ];
                 
-                // Create a DOM parser to extract links
-                const parser = new DOMParser();
-                const doc = parser.parseFromString(html, 'text/html');
+                // Also try to detect files with a HEAD request to minimize loading
+                const foundSites = [];
                 
-                // Get all links (these are typically the files in the directory)
-                const links = Array.from(doc.querySelectorAll('a'))
-                    .filter(link => {
-                        const href = link.getAttribute('href');
-                        return href && 
-                               href.endsWith('.html') && 
-                               href !== 'index.html' &&
-                               !href.startsWith('http');
-                    })
-                    .map(link => ({
-                        name: link.textContent.trim(),
-                        path: link.getAttribute('href'),
-                        dateAdded: new Date() // We can't get actual dates easily, so using current date
-                    }));
+                for (const filename of commonFilenames) {
+                    try {
+                        const response = await fetch(filename, { method: 'HEAD' });
+                        if (response.ok) {
+                            // Try to get the title from the actual HTML (optional, but nice)
+                            try {
+                                const htmlResponse = await fetch(filename);
+                                const html = await htmlResponse.text();
+                                const parser = new DOMParser();
+                                const doc = parser.parseFromString(html, 'text/html');
+                                const title = doc.querySelector('title')?.textContent || filename;
+                                
+                                foundSites.push({
+                                    name: title,
+                                    path: filename,
+                                    dateAdded: new Date()
+                                });
+                            } catch (titleError) {
+                                // If we can't get the title, just use the filename
+                                foundSites.push({
+                                    name: filename.replace('.html', ''),
+                                    path: filename,
+                                    dateAdded: new Date()
+                                });
+                            }
+                        }
+                    } catch (fileError) {
+                        // Skip files that don't exist
+                        continue;
+                    }
+                }
                 
-                renderWebsites(links);
+                // Add a way to detect custom HTML files
+                // Look for any URL parameters that might indicate HTML files
+                const urlParams = new URLSearchParams(window.location.search);
+                const customFiles = urlParams.get('files');
+                
+                if (customFiles) {
+                    const filesList = customFiles.split(',');
+                    for (const file of filesList) {
+                        if (file.endsWith('.html')) {
+                            try {
+                                const response = await fetch(file, { method: 'HEAD' });
+                                if (response.ok) {
+                                    foundSites.push({
+                                        name: file.replace('.html', ''),
+                                        path: file,
+                                        dateAdded: new Date()
+                                    });
+                                }
+                            } catch (error) {
+                                // Skip files that don't exist
+                                continue;
+                            }
+                        }
+                    }
+                }
+                
+                renderWebsites(foundSites);
             } catch (error) {
                 console.error('Error loading websites:', error);
                 showStatus('Failed to load websites. Please try again.', true);
